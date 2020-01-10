@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 from sys import exit
 from typing import List
+import json
 import argparse
 
 import enlighten
@@ -25,6 +27,9 @@ def menu():
     parser.add_argument(
         "-j", "--job", nargs=2, action='append', type=str, metavar=('source','dest'),
         help="Tuple of Source and Destfile tree to run, `path` or `host:path`")
+    parser.add_argument(
+        "-c", "--config", action='append', type=str, metavar='config',
+        help="Path to a config file")
 
     return parser
 
@@ -56,5 +61,9 @@ if __name__ == '__main__':
     parser = menu()
     args = parser.parse_args()
     jobs = [job_from_tuple(t) for t in args.job]
+    for c in args.config:
+        with open(os.path.expanduser(c)) as fp:
+            data = json.load(fp)
+        jobs.append(SyncJob(data))
     vprint('{}'.format(jobs))
     exit(main(jobs))

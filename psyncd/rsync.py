@@ -57,7 +57,7 @@ class InotifyThread(threading.Thread):
     Convenience class for calling a callback at a specified rate
     """
 
-    def __init__(self, jobdict, job, period=0.1, sync_on_start=True):
+    def __init__(self, jobdict, job, period=10, sync_on_start=True):
         """
         Constructor.
         @param period: desired sleep period between callbacks
@@ -80,7 +80,8 @@ class InotifyThread(threading.Thread):
         self._period = period
         self._running = True
         self.adapter = inotify.adapters.Inotify()
-        self.adapter.add_watch(job.source)
+        if not self._job.get('nolisten', False):
+            self.adapter.add_watch(job.source)
         self.daemon = True
         self.start()
 
@@ -93,10 +94,19 @@ class InotifyThread(threading.Thread):
     def sleep(self):
         time.sleep(self._period)
 
+    def run_nolisten(self):
+        # hack: this totally breaks the pattern but I don't wanna code a server-client rn
+        while self._running:
+            self._queue.put(True)
+            self.sleep()
+
     def run(self):
         vprint("Inotify start: {}".format(self._job))
+        if self._job.get('nolisten', False):
+            self.run_nolisten()
+            return
+
         while self._running:
-            self.sleep()  # is this necessary?
             for event in self.adapter.event_gen(yield_nones=False):
                 header, type_names, path, filename = event
                 if DEFAULT_EVENTS.intersection(set(type_names)):
@@ -106,9 +116,10 @@ class InotifyThread(threading.Thread):
                     vprint("Put: {}: {}".format(filename, type_names))
 
 
+
 class RSyncThread(threading.Thread):
     def __init__(self, jobdict, job, rsync_bar):
-        # type: (JobDict[SyncJob, Queue[bool]], SyncJob) -> None
+        # type: (JobDict[SyncJob, Queue[bool]], SyncJob, Any) -> None
         super(RSyncThread, self).__init__(name="rsync")
         self._queue = jobdict[job]
         self._job = job

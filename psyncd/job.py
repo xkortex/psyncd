@@ -24,7 +24,7 @@ class HashaDictMixin(dict):
 
 
 class SyncJob(addict.Dict, HashaDictMixin):
-    __slots__ = ['source', 'dest']
+    __slots__ = ['source', 'dest', 'nolisten']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
