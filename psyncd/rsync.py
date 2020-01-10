@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import os
-import subprocess
+import re
 import threading
-from queue import Queue, Empty
+from queue import Queue
 import time
 from typing import List
 
@@ -12,6 +12,7 @@ import inotify.adapters
 from vprint import vprint
 
 from psyncd.job import SyncJob, JobDict
+from psyncd.subproc import subproc_with_yield
 
 DEFAULT_EVENTS = {
     "IN_CLOSE_WRITE",
@@ -21,6 +22,18 @@ DEFAULT_EVENTS = {
     "IN_MOVED_TO",
     "IN_MODIFY",
 }
+PAT_PERC = r"(?P<perc>\d*\.?\d*\%)"
+
+# Use float formatting for count and total in bar_format
+BAR_FMT = (
+    u"{desc}{desc_pad}{percentage:3.0f}%|{bar}| {count:{len_total}.1f}/{total:.1f} "
+    + u"[{elapsed}<{eta}, {rate:.2f}{unit_pad}{unit}/s]"
+)
+
+COUNTER_FMT = (
+    u"{desc}{desc_pad}{count:.1f} {unit}{unit_pad}"
+    + u"[{elapsed}, {rate:.2f}{unit_pad}{unit}/s]{fill}"
+)
 
 
 def job_to_command(job):
@@ -32,6 +45,7 @@ def job_to_command(job):
         "--archive",
         "--log-file={}".format(logfile),
         "--delete",
+        "--info=progress2",
         job.get("source"),
         job.get("dest"),
     ]
@@ -43,7 +57,7 @@ class InotifyThread(threading.Thread):
     Convenience class for calling a callback at a specified rate
     """
 
-    def __init__(self, jobdict, job, period=0.1):
+    def __init__(self, jobdict, job, period=0.1, sync_on_start=True):
         """
         Constructor.
         @param period: desired sleep period between callbacks
@@ -57,6 +71,8 @@ class InotifyThread(threading.Thread):
             raise RuntimeError("Job is already present in jobdict: {}".format(job))
         super(InotifyThread, self).__init__(name="inotify")
         self._queue = Queue(maxsize=1)
+        if sync_on_start:
+            self._queue.put(True)
         jobdict[job] = self._queue
         self._job = job
         self._jobdict = jobdict
@@ -91,13 +107,14 @@ class InotifyThread(threading.Thread):
 
 
 class RSyncThread(threading.Thread):
-    def __init__(self, jobdict, job):
+    def __init__(self, jobdict, job, rsync_bar):
         # type: (JobDict[SyncJob, Queue[bool]], SyncJob) -> None
         super(RSyncThread, self).__init__(name="rsync")
         self._queue = jobdict[job]
         self._job = job
         self._jobdict = jobdict
         self._cmd = job_to_command(job)
+        self._rsync_bar = rsync_bar
 
         self.daemon = True
 
@@ -117,11 +134,16 @@ class RSyncThread(threading.Thread):
             self._queue.get()
             vprint("Synching: {}".format(self._job))
             cmd = job_to_command(self._job)
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-            stdout, stderr = proc.communicate()
-            vprint("rsync status: {}".format(stdout))
-            proc.wait()
+            for out in subproc_with_yield(cmd):
+                res = re.search(PAT_PERC, out)
+                if res:
+                    if "perc" in res.groupdict():
+                        perc = float(res.groupdict()["perc"].strip("%"))
+                        self._rsync_bar.count = int(perc)
+                        self._rsync_bar.refresh()
             vprint("Synchronization finished.")
+            self._rsync_bar.count = 100
+            self._rsync_bar.refresh()
             if not self._jobdict:
                 vprint("Nothing to do!")
                 continue

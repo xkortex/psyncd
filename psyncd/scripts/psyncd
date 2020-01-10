@@ -4,6 +4,8 @@
 from sys import exit
 from typing import List
 import argparse
+
+import enlighten
 import appdirs
 from vprint import vprint
 
@@ -33,11 +35,13 @@ def main(jobs):
     rsync_threads = {}
     job_dict = JobDict()
     print(jobs)
+    manager = enlighten.get_manager()
     for job in jobs:
         # this is bad and I feel bad
+        rsync_bar = manager.counter(total=100, desc=job.source)
 
         inotify_threads[job] = InotifyThread(job_dict, job)
-        rsync_threads[job] = RSyncThread(job_dict, job)
+        rsync_threads[job] = RSyncThread(job_dict, job, rsync_bar)
 
     for k, t in inotify_threads.items():
         t.join()
