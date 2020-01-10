@@ -1,0 +1,3 @@
+include versioneer.py
+include psyncd/_version.py
+include psyncd/scripts/psyncd
