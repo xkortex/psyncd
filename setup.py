@@ -27,10 +27,12 @@ print('Packages:', packages)
 # common dependencies
 # todo: fully test unified dependencies
 deps = [
+    'addict~=2.2.1',
     'appdirs~=1.4',
     'inotify~=0.2.10',
     'typing',
     'pyyaml',
+    'vprint'
 
 ]
 
