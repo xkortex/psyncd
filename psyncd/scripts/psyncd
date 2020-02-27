@@ -3,6 +3,8 @@
 
 import os
 from sys import exit
+import time
+import threading
 from typing import List
 import json
 import argparse
@@ -36,6 +38,8 @@ def menu():
 
 def main(jobs):
     # type: (List[SyncJob]) -> int
+    run_event = threading.Event()
+    run_event.set()
     inotify_threads = {}
     rsync_threads = {}
     job_dict = JobDict()
@@ -45,14 +49,23 @@ def main(jobs):
         # this is bad and I feel bad
         rsync_bar = manager.counter(total=100, desc=job.source)
 
-        inotify_threads[job] = InotifyThread(job_dict, job)
-        rsync_threads[job] = RSyncThread(job_dict, job, rsync_bar)
+        inotify_threads[job] = InotifyThread(job_dict, job, run_event=run_event)
+        rsync_threads[job] = RSyncThread(job_dict, job, rsync_bar, run_event=run_event)
 
-    for k, t in inotify_threads.items():
-        t.join()
+    try:
+        while True:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("attempting to close threads.")
+        run_event.clear()
+    finally:
+        print("waiting on threads")
 
-    for k, t in rsync_threads.items():
-        t.join()
+        for k, t in inotify_threads.items():
+            t.join()
+        for k, t in rsync_threads.items():
+            t.join()
+    print("threads successfully closed")
 
     return 0
 
@@ -60,10 +73,15 @@ def main(jobs):
 if __name__ == '__main__':
     parser = menu()
     args = parser.parse_args()
-    jobs = [job_from_tuple(t) for t in args.job]
-    for c in args.config:
+    jobs = []
+    if args.job:
+        jobs += [job_from_tuple(t) for t in args.job]
+    for c in args.config or []:
         with open(os.path.expanduser(c)) as fp:
             data = json.load(fp)
-        jobs.append(SyncJob(data))
+        if isinstance(data, dict):
+            jobs.append(SyncJob(data))
+        elif isinstance(data, list):
+            jobs += [SyncJob(d) for d in data]
     vprint('{}'.format(jobs))
     exit(main(jobs))
